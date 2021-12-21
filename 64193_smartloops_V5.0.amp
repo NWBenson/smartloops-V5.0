@@ -1,0 +1,471 @@
+%%[/* Initiating the Smartloops Logic by checking Brand and EmailDay */]%%
+
+%%[
+
+SET @Brand = __AdditionalEmailAttribute5
+IF @Brand == "ag" then
+   SET @newestrecord_DE = "AG_Most_Recent_Lead"
+   SET @property_listing_DE = "AG_Delta_Import"
+   SET @recommendations_excludesDE = "Shown_Properties"
+   SET @SubjectlineDE = "ag_leads_drip_versioning"
+   SET @Coupon_PriorityDE = "ag_coupon_priority"
+   SET @Coupon_City_CountDE = "ag_coupons_city"
+   SET @ContentDE = "ag_drip_content"
+   SET @ProgramID = 1
+  SET @OneClickDE = "B2C_AG_OneClick_Leads" 
+   SET @CloudPageID = "231" 
+   IF @InsertDaysAGO == 0 THEN
+     SET @journey_status = "ag_journey_status"
+      SET @journey_status2 = "ag_journey_status"
+   ELSE
+     SET @journey_status = "ag_search_journey_status"
+     SET @journey_status2 = "ag_search_journey_status2"
+   ENDIF
+ELSEIF @Brand == "rent" then
+   SET @newestrecord_DE = "Rent_Most_Recent_Lead"
+   SET @property_listing_DE = "Rent_Delta_Import"
+   SET @recommendations_excludesDE = "Shown_Properties"
+   SET @SubjectlineDE = "rent_leads_drip_versioning"
+   SET @Coupon_PriorityDE = "rent_coupon_priority"
+   SET @Coupon_City_CountDE = "rent_coupons_city"
+   SET @ContentDE = "rent_drip_content"
+   SET @ProgramID = 1
+  SET @OneClickDE = "B2C_Rent_OneClick_Leads" 
+   SET @CloudPageID = "193" 
+   IF @InsertDaysAGO == 0 THEN
+     SET @journey_status = "rent_confirmation_journey_status"
+     SET @journey_status2 = "rent_confirmation_journey_status"
+   ELSE
+     SET @journey_status = "Rent_Search_Journey_Status"
+     SET @journey_status2 = "Rent_Search_Journey_Status2"
+   ENDIF
+ELSEIF @Brand == "rentals" then
+   SET @newestrecord_DE = "Rentals_Most_Recent_Lead"
+   SET @property_listing_DE = "Rentals_B2C_Listing_Details"
+   SET @recommendations_excludesDE = "Rentals_Shown_Properties"
+   SET @SubjectlineDE = "Rentals_search_drip_content"
+   SET @Coupon_City_CountDE = "ag_coupons_city_DEV"
+   SET @ProgramID = 1
+   SET @OneClickDE = "B2C_Rent_OneClick_Leads" 
+   SET @CloudPageID = "216" 
+    IF @EmailDay == 0 THEN
+   SET @journey_status = "Rentals_Confirmation_Journey_Status"
+   SET @journey_status2 = "Rentals_Confirmation_Journey_Status"
+   ELSE
+   SET @journey_status = "Rentals_Search_Journey_Status"
+   SET @journey_status2 = "Rentals_Search_Journey_Status2"
+   ENDIF
+ENDIF
+
+ /* Set the universal DE's used and attributes */
+
+
+SET @statelookupDE = 'ENT.state_lookup'
+SET @brand_iconsDE = 'b2c_master_brand_icons'
+SET @preferencesDE = "Subscriber_Preferences_Master"
+SET @preferences_programID = "1"
+SET @error_DE = "B2C_Leads_Errors"
+SET @Subject_Version = "Default"
+SET @insert_date = insert_date
+SET @Application_Optin = Application_Optin
+SET @Lead_ID = leadid
+SET @Campaign_ID = Campaign_ID
+SET @ListingType = ListingType 
+SET @Source = Source 
+SET @Lead_ListingID = listingID
+SET @SubscriberKey = SubscriberKey
+SET @JourneyName = __AdditionalEmailAttribute2
+SET @Lead_City = search_city
+SET @Lead_State = search_state
+SET @leadprop = 0
+SET @noexcludes = 0 
+SET @norecos = 0
+SET @noshowed = 0 
+SET @SentCount = 1
+SET @Batchid = _JobSubscriberBatchId
+SET @Jobid = jobid
+SET @EmailAddress = EmailAddress
+SET @SubscriberKey = SubscriberKey
+SET @StepTrackingDE = @JourneyTrackingDE
+]%%
+
+%%[/* Lookup Send Step Related Details from Step Tracking DE for send readiness validation  */ 
+
+SET @SubscriberCheck  = Lookup(@StepTrackingDE, 'SubscriberKey', 'SubscriberKey', @Subscriberkey)
+
+/* SubscriberCheck failed - Skip Send - continue to next subscriber  */
+IF EMPTY(@SubscriberCheck) THEN
+ UpsertDE(@ErrorDE, 1, 'SubscriberKey', @SubscriberKey, 'Error', 'No Subscriber Found in Status DE - Skip Send')
+SET @RaiseError = RaiseError('No Subscriber Found in Send Tracking DE - Skip Send', True)
+ENDIF
+
+/* SubscriberCheck Success - Lookup Send Tracking Details */ 
+SET @EmailDay =  Lookup(@StepTrackingDE, 'EmailDay', 'SubscriberKey', @Subscriberkey)
+
+/* Override Email Day for Dev and Preview testing  */
+SET @Override = ''
+IF @Dev == 1 THEN
+ SET @EmailDay = @DevDay
+ SET @Override = @LastLeadOverride
+ENDIF
+
+]%%
+
+%%[ /* look up latest lead from day 2 */
+
+IF @EmailDay >= 2 AND @Override != 'True' THEN
+  set @lastlead_LR = LookupRows(@newestrecord_DE,"EmailAddress",@EmailAddress)
+  set @lastlead_RC = RowCount(@lastlead_LR)
+
+  IF @lastlead_RC > 0 THEN
+    SET @lastlead_Row = Row(@lastlead_LR,1)
+    SET @lastlead_date = Field(@lastlead_Row,'Insert_Date')
+    SET @lastlead_listingid =  Field(@lastlead_Row,'listingID')
+    SET @newlead = 1
+    SET @lead_date_diff = DateDiff(@lastlead_date,@insert_date, 'MI')
+     SET @Lead_ListingID = @lastlead_listingid
+     SET @Lead_State_Name = Lookup(@statelookupDE,"State","Abbrev",@Search_State)
+  ELSE
+    SET @newlead = "0"
+    SET @lead_date_diff = "0"
+  ENDIF
+ENDIF
+]%%
+
+
+%%[/* Use Lead ListingID to set recommendations and Reshows */]%%
+
+ %%[SET @Lead_Property_Row = LookupRows(@property_listing_DE ,"ListingID",@Lead_ListingID)
+ SET @ShowedLIDs = LookupRows(@recommendations_excludesDE, "EmailAddress", @EmailAddress)
+ SET @ReshowListIDs1 = LookupRows(@recommendations_excludesDE, "EmailAddress", @EmailAddress, "Search_ListingID", @Lead_ListingID, "Sent_Count", 1, 'Lead_Submitted', 'False')
+ SET @ReshowListIDs2 = LookupRows(@recommendations_excludesDE, "EmailAddress", @EmailAddress, "Search_ListingID", @Lead_ListingID, "Sent_Count", 2, 'Lead_Submitted', 'False')
+
+   IF RowCount(@Lead_Property_Row) <= 0 THEN
+     SET @norecos = 1
+   ELSE
+    SET @leadprop = 1
+   ENDIF 
+
+   IF RowCount(@Lead_Property_Row) > 0 THEN
+     Set @lead_Property = Row(@Lead_Property_Row,1) 
+     SET @recommendations = Field(@lead_Property, "recommendedlistings")
+     SET @newlead_city = Field(@lead_Property, "city")
+     SET @Lead_PropertyName = Field(@lead_Property, "PropertyName")
+      SET @Lead_City = Field(@lead_Property, "City")
+      SET @Lead_State = Field(@lead_Property, "State")
+       SET @Lead_Zip = Field(@lead_Property, "Zip")
+       SET @Lead_Address = Field(@lead_Property, "Address")
+       SET @Leadactive = Field(@lead_Property, "IsActive")
+       SET @Lead_Coupon = Field(@lead_Property, "CouponCategory")
+       SET @Application_URL = Field(@lead_Property, "ApplyOnline_URL")
+     /*SET @Application_URL = Replace(@Application_URL, '?', '&')*/
+     SET @Search_Price = Lookup(@property_listing_DE,"PriceLow","listingid",@Lead_Listingid)
+IF Empty(@Search_Price) OR @Search_Price > 99999 OR THEN
+   SET @Search_Price = "1800"
+ENDIF
+   SET @Search_Price = DIVIDE(@Search_Price,500)
+   SET @Search_Price = FormatNumber(ADD(@Search_Price,0), "0", "en-US")
+   SET @Search_Price = Multiply(@Search_Price,'500')
+ SET @URL_Under_Price = Concat(@Search_URL,'_max-price-', @Search_Price)
+ ENDIF
+IF @Search_Price == "" OR EMPTY(@Search_Price) OR @Search_Price IS NULL OR @Search_Price > 10001 THEN
+ SET @Search_Price = "1800"
+ ENDIF
+ 
+ SET @city_info =  LookupRows(@Coupon_City_CountDE,"City",@Lead_City, "State", @Lead_State)
+ IF RowCount(@city_info) > 0 THEN
+  SET @City_Row = Row(@city_info,1)
+  SET @Lead_City_image = Field(@city_Row,'City_Image')
+  SET @Lead_City_link = Field(@city_Row,'City_Url')
+  SET @Coupon_Count = Field(@city_Row,'Coupon_Count')
+  SET @AttFiber_City = Field(@city_Row,'ATT_Fiber')
+  SET @LemonadeIns_city = Field(@city_Row,'Lemonade_Ins')
+ ENDIF
+
+   IF EMPTY(Rowcount(@ShowedLIDs)) THEN
+    SET @noexcludes = 1
+   ELSE 
+   ENDIF
+ 
+/*  Check for Active Recos */
+      
+ IF @recommendations == "" THEN
+   Set @norecos = 1
+  ELSE
+   SET @Recos = BuildRowsetFromString(@Recommendations,'^')
+   FOR @z = 1 TO RowCount(@Recos) DO
+      SET @RecoRow = Row(@Recos,@z) 
+      SET @RecoLID = Field(@RecoRow,1) 
+      SET @ActiveReco = Lookup(@property_listing_DE , "ListingID" ,"ListingID",@RecoLID, "IsActive", 1 )
+      SET @RecProps = Concat(@RecProps,@ActiveReco,'^')
+      SET @ActiveRecommendedlistings = @RecProps
+   next @z
+   SET @Active_Recommendations = BuildRowsetFromString(@ActiveRecommendedlistings,'^') 
+  ENDIF
+  
+ 
+ /* Exclude already showed recos */
+   IF @ActiveRecommendedlistings == "^" THEN
+       SET @norecos = 1
+      ELSE
+      SET @smartrecommendations = @ActiveRecommendedlistings
+      For @p=1 to RowCount(@ShowedLIDs) do 
+        Set @ShowedListIDRow = Row(@ShowedLIDs,@p) 
+        SET @ShowedLID = Field(@ShowedListIDRow,'listingid') 
+        SET @2xclusions = Concat(@2xclusions,@ShowedLID,'^')
+        SET @smartrecommendations = ReplaceList(@smartrecommendations,"", Concat(@ShowedLID,'^'))
+      next @p
+      SET @Recommendedlistings_smartloop = @smartrecommendations
+       SET @Recommendedlistings_smartloop = ReplaceList(@Recommendedlistings_smartloop,"",'^^')
+   ENDIF
+       SET @SmartloopsRows = BuildRowSetFromString(@smartrecommendations,'^') 
+       
+/* In check for Active listingids in the already showed recos for reshow */      
+ 
+  IF EMPTY(Rowcount(@ShowedLID1s)) AND EMPTY(Rowcount(@ShowedLID2s)) THEN
+   SET @noshowed = 1
+   SET @helloworld = 2
+  ENDIF 
+  
+    IF NOT EMPTY(@ReshowListIDs1) THEN
+     SET @Reshows = @ReshowListIDs1
+     FOR @q = 1 TO RowCount(@Reshows) DO
+        SET @ReshowRow = Row(@Reshows,@q) 
+        SET @ReshowLID = Field(@ReshowRow,'listingid') 
+        SET @ActiveReshow1 = Lookup(@property_listing_DE , "ListingID" ,"ListingID",@ReshowLID, "IsActive", 1 )
+        SET @ReshowProps = Concat(@ReshowProps,@ActiveReshow1,'^')
+        SET @ActiveReshows1 = @ReshowProps
+     next @q
+     SET @Active_Reshows1 = BuildRowsetFromString(@ActiveReshows1,'^') 
+     ENDIF 
+     IF NOT EMPTY(@ReshowListIDs2) THEN 
+       SET @Reshows = @ReshowListIDs2
+       FOR @r = 1 TO RowCount(@Reshows) DO
+        SET @ReshowRow = Row(@Reshows,@r) 
+        SET @ReshowLID = Field(@ReshowRow,'listingid') 
+        SET @ActiveReshow2 = Lookup(@property_listing_DE , "ListingID" ,"ListingID",@ReshowLID, "IsActive", 1 )
+        SET @ReshowProps = Concat(@ReshowProps,@ActiveReshow2,'^')
+        SET @ActiveReshows2 = @ReshowProps
+     next @r
+     SET @Active_Reshows2 = BuildRowsetFromString(@ActiveReshows2,'^') 
+    ENDIF
+   
+  IF EMPTY(@Recommendedlistings_smartloop) OR @Recommendedlistings_smartloop == "^"  THEN
+    SET @norecos = 1
+    SET @SmartloopsRows = @Active_Reshows1
+    SET @SentCount = 2
+    IF EMPTY(@ActiveReshows1) THEN
+      SET @SmartloopsRows = @Active_Reshows2
+      SET @SentCount = 3
+      IF EMPTY(@ActiveReshows2) THEN
+       SET @noshowed = 1
+         SET @helloworld = 3 
+      ENDIF
+    ENDIF
+  ENDIF
+ 
+  IF RowCount(@SmartloopsRows) >= 5 THEN
+     Set @Numrecs = 4
+  ELSE 
+     SET @Numrecs = Add(RowCount(@SmartloopsRows),-1)
+  ENDIF
+     
+    SET @num = 0 
+     IF @Numrecs > 0 THEN
+       FOR @u = 1 TO @Numrecs DO
+        SET @RecoRowloop = Row(@SmartloopsRows ,@u)
+        SET @ActiveLID = FIELD(@RecoRowloop,1)
+        SET @REC_Property = LookupRows(@property_listing_DE , "ListingID" ,@ActiveLID,"IsActive", 1)
+        IF RowCount(@REC_Property) <= 0 THEN
+        /* SET @num = @Numrecs */
+         ELSE
+        SET @num = Add(@num,1)
+        ENDIF
+       NEXT @u
+     ENDIF
+    
+  IF @num <= 0 OR @Numrecs <= 0 THEN
+    SET @norecos = 1
+    SET @Subject_Version = "Reshow"
+    SET @SmartloopsRows = @Active_Reshows1
+    SET @SentCount = 2
+    IF EMPTY(@Active_Reshows1) THEN
+      SET @SmartloopsRows = @Active_Reshows2
+      SET @SentCount = 3
+      IF EMPTY(@Active_Reshows2)THEN
+       SET @noshowed = 1
+       SET @helloworld = 4
+       SET @Subject_Version = "Winback"
+      ENDIF
+    ENDIF
+  ENDIF 
+  
+]%%
+%%[
+/* Set Subject_Version based on reco check*/
+IF @EmailDay == 0 THEN
+  IF @leadprop == 0 THEN
+   SET @Subject_Version = "Fallback"
+   ELSE
+   /* call in display logic based on brand*/
+    IF @ListingType == 'LOVELY' THEN
+       SET @Subject_version = 'love'
+    ELSEIF @ListingType == 'LNP' THEN
+       SET @Subject_version = 'lnp'
+    ELSEIF @ListingType == 'INACTIVE' THEN
+       SET @Subject_version = 'Inac'
+    ELSEIF @ListingType == 'RENTALS' THEN
+      SET @Subject_version = 'rentals'
+    ELSEIF @ListingType == 'RENT' THEN
+      SET @Subject_version = 'rent'
+    ELSEIF @ListingType == 'AG' THEN
+      SET @Subject_version = 'ag'
+    ELSEIF @ListingType == 'ACTIVE' THEN
+     SET @Subject_version = @Brand
+    ELSEIF @Source == 'ULOOP' OR @Source == 'WALKSCORE' OR @Source == "ZUMPER"  OR @Source == 'KEYLASSO'  THEN
+        SET @Subject_version = Substring(@Source, 1, 4)
+        SET @SubjectTest = lowerCase(Substring(@Source, 1, 4))
+    ENDIF
+   
+    
+    SET @Application_Optin = Application_Optin
+    IF @Application_Optin == 1 AND @Application_URL != "" THEN
+       SET @Subject_version = 'AppURL'
+    ELSE
+    ENDIF
+     /* Amazon Campaign Test */
+    SET @DisplayCampaign = Campaign_ID
+      IF @Brand == 'ag' AND @Subject_version == 'AppURL' AND @DisplayCampaign >= '21118321' AND @DisplayCampaign <= '21118325' THEN
+         SET @Subject_version = 'AmazonAppURL' 
+      ELSEIF @DisplayCampaign >= '21118321' AND @DisplayCampaign <= '21118325' THEN
+         SET @Subject_version = 'Amazon'  
+      ENDIF
+  ENDIF
+ELSE 
+ IF @norecos == 1 AND @EmailDay != 0 THEN
+   SET @Subject_Version = "Reshow"
+ ENDIF
+ IF @noshowed == 1 AND @EmailDay != 0 THEN
+   SET @Subject_Version = "Winback"
+ ENDIF 
+ SET @WinbackSentCount = Lookup(@journey_status2,"WinbackSentCount","SubscriberKey", @SubscriberKey) 
+ IF @Subject_Version == "Winback" AND @WinbackSentCount >= 2 AND @EmailDay != 0 THEN 
+   SET @Subject_Version = "Oops"
+ ENDIF
+ENDIF
+
+IF @EmailDay == 29 THEN
+  SET @Subject_Version = "default"
+ENDIF
+
+SET @Subject_Version = Concat(@Subject_Version,@Versioning)
+SET @CampaignID = Lookup(@SubjectlineDE,"CampaignID","EmailDay",@EmailDay,"Version",@Subject_version) 
+SET @CampaignName = Lookup(@SubjectlineDE,"CampaignName","EmailDay",@EmailDay,"Version",@Subject_version) 
+
+/* UPDATED - SET Priorities and CTA */
+SET @CTA_PDP = Lookup(@SubjectlineDE,"CTA_PDP","EmailDay",@EmailDay,"Version",@Subject_version) 
+SET @CTA_OC = Lookup(@SubjectlineDE,"CTA_OC","EmailDay",@EmailDay,"Version",@Subject_version)  
+SET @CTA_Tour = Lookup(@SubjectlineDE,"CTA_Tour","EmailDay",@EmailDay,"Version",@Subject_version) 
+SET @CTA_Text = Lookup(@SubjectlineDE,"CTA_Text","EmailDay",@EmailDay,"Version",@Subject_version) 
+SET @CTA_Apply = Lookup(@SubjectlineDE,"CTA_Apply","EmailDay",@EmailDay,"Version",@Subject_version) 
+SET @Coupon_Version = Lookup(@SubjectlineDE,"Coupon_Version","EmailDay",@EmailDay,"Version",@Subject_version)
+SET @Reco_Pod_Version = Lookup(@SubjectlineDE,"Reco_Pod_Version","EmailDay",@EmailDay,"Version",@Subject_version) 
+SET @Conf_Pod_Version = Lookup(@SubjectlineDE,"Conf_Pod_Version","EmailDay",@EmailDay,"Version",@Subject_version)
+SET @ContentName = Lookup(@ContentDE, "Content_Name", "EmailDay",@EmailDay,"Version",@Subject_version, "ContentID", "55912")
+
+
+IF @Brand == 'rentals' THEN
+SET @ApplyURL = CloudPagesURL(216,'clickURL',@Application_URL,'clickLID',@Lead_ListingID,'SubscriberKey',_subscriberkey,'brand',__AdditionalEmailAttribute5, 'campaignid', @campaignID,'jobid', @Jobid, 'batchid', @BatchId, 'leadid', @Lead_ID)
+ELSE
+SET @ApplyURL = CloudPagesURL(209,'clickLID',@Lead_ListingID,'SubscriberKey',_subscriberkey,'brand',__AdditionalEmailAttribute5, 'campaignid', @campaignID, 'jobid', @Jobid, 'batchid', @BatchId, 'leadid', @Lead_ID)
+
+SET @TestApplURL = Concat('https://pub.s6.exacttarget.com/d5bmpp44ujj?','clickLID',@Lead_ListingID,'SubscriberKey',_subscriberkey,'brand',__AdditionalEmailAttribute5, 'campaignid', @campaignID, 'jobid', @Jobid, 'batchid', @BatchId,'leadid', @Lead_ID)
+
+ENDIF
+
+SET @PreHeader = Lookup(@SubjectlineDE,"PreHeader","EmailDay",@EmailDay,"Version",@Subject_version) 
+SET @subject_lookup = Lookup(@SubjectlineDE,"SubjectLine","EmailDay",@EmailDay,"Version",@Subject_version) 
+SET @SubjectLine = @subject_lookup
+SET @SubjectLine =  Replace(@SubjectLine,'%%=v(@shownumrecs)=%%',@num)
+
+IF IndexOf(@SubjectLine,'Search_City') > 0 THEN
+SET @SubjectLine = Replace(@SubjectLine,'%%=v(@Search_City)=%%',Propercase(@Lead_City))
+ENDIF
+
+IF IndexOf(@SubjectLine,'Search_State') > 0 THEN
+SET @SubjectLine = Replace (@SubjectLine,'%%=v(@Search_State)=%%',Propercase(@Lead_State))
+ENDIF
+IF IndexOf(@SubjectLine,'Select_PropertyName') > 0 THEN
+SET @SubjectLine = Replace (@SubjectLine,'%%=v(@Select_PropertyName)=%%',Propercase(@Lead_PropertyName))
+ENDIF
+
+IF IndexOf(@SubjectLine,'@Residence') > 0 THEN
+SET @SubjectLine = Replace (@SubjectLine,'%%=v(@Residence)=%%',Propercase(@Residence))
+ENDIF
+
+IF IndexOf(@SubjectLine,'Search_Price') > 0 THEN
+SET @SubjectLine = Replace (@SubjectLine,'%%Search_Price%%',Propercase(@Search_Price))
+ENDIF
+
+IF IndexOf(@SubjectLine,'Lead_Address') > 0 THEN
+SET @SubjectLine = Replace (@SubjectLine,'%%=v(Lead_Address)=%%',Propercase(@Lead_Address))
+ENDIF
+
+SET @SubjectLine = Replace (@SubjectLine,"â€™","'")
+SET @SubjectLine = Replace (@SubjectLine,"â€“","-")
+
+IF EMPTY(@SubjectLine) THEN
+SET @SubjectLine = Concat("Continue your search in ", @Lead_City)
+SET @Preheader = "Let's find the perfect place for you"
+IF @Brand == "ag" then
+SET @CampaignID = "311002090"
+SET @Reco_Pod_Version = "1"
+ELSEIF @BRAND == "rent" THEN
+SET @CampaignID = "312002020"
+SET @Reco_Pod_Version = "1"
+IF @Versioning == "OneClick" THEN
+SET @CampaignID = "332002020"
+SET @@Reco_Pod_Version = "1"
+ENDIF
+ELSEIF @Brand == "rentals" THEN
+SET @CampaignID = "313001009"
+ENDIF 
+SET @CampaignName = CONCAT(@brand,"_b2c_off_jb_drip_d", @EmailDay, "_catchall_v2_default")
+ENDIF
+
+
+  %%[IF @EmailDay == 0 THEN
+   SET @PrefUpsert = UpsertDE(@preferencesDE,4,"EmailAddress",@EmailAddress,"Brand",@Brand,"BusinessChannel","B2C","ProgramID",@ProgramID,"ProgramIDStatus",1, "Source", __AdditionalEmailAttribute2 ,"Created_Date", Now()) 
+
+/* SET @JourneyStatusUpsert = UpdateDE(@journey_status, 1, 'SubscriberKey', @SubscriberKey, 'EmailAddress', @EmailAddress,'EmailDay', @EmailDay, 'Last_Updated', Now(),'Reason', "Lead Submitted", 'Search_ListingID', @Lead_ListingID)*/
+ 
+  ENDIF]%%
+  %%[IF @EmailDay != 0 THEN
+  
+          IF @Subject_Version == Concat("Winback",@Versioning) THEN
+           SET @lookupreason = Lookup(@journey_status2,"Reason","SubscriberKey", @SubscriberKey) 
+            IF @lookupreason == "Winback Email Sent" THEN
+               SET @WinbackCount = 2
+               SET @WinbackHello = "Winback 2 Upsert"
+               SET @NewReason =Concat("Winback Email ", @WinbackCount, " Sent")
+              SET @WinbackUpsert = UpsertDE(@journey_status, 1, 'SubscriberKey', @SubscriberKey, 'EmailAddress', @EmailAddress,'EmailDay', @EmailDay, 'WinbackEmail', 1 , 'WinbackSentCount', 2, 'WinBack_LastSentDate', Now(),'Reason',"Winback Email 2 Sent")
+            ELSE 
+                 SET @WinbackCount = 1
+                SET @WinbackUpsert = UpsertDE(@journey_status, 1, 'SubscriberKey', @SubscriberKey, 'EmailAddress', @EmailAddress,'EmailDay', @EmailDay, 'WinbackEmail', 1 , 'WinbackSentCount', 1, 'WinBack_LastSentDate', Now(),'Reason',"Winback Email Sent")
+            ENDIF
+          ENDIF
+  
+          IF @Subject_Version == Concat("Oops",@Versioning) THEN
+            SET @WinbackCount = 0
+            SET @WinbackHello = "Oops Upsert"
+            SET @lookupreason = Lookup(@journey_status2,"Reason","SubscriberKey", @SubscriberKey) 
+            SET @NewReason = Concat("Oops Email Sent day", @EmailDay)
+            SET @OopsUpsert = UpsertDE(@journey_status, 1, 'SubscriberKey', @SubscriberKey, 'EmailAddress', @EmailAddress, 'EmailDay', @EmailDay, 'WinbackEmail', 0 , 'WinbackSentCount', 0, 'Reason', @NewReason , 'StopSending', 1, 'InJourney', 0)  
+          ENDIF
+  
+  
+          IF @Subject_Version != Concat("Winback",@Versioning) AND @Subject_Version != Concat("Oops",@Versioning) THEN
+             SET @JourneyStatusUpsert = UpsertDE(@journey_status, 1, 'SubscriberKey', @SubscriberKey, 'EmailAddress', @EmailAddress,'EmailDay', @EmailDay, 'Last_Updated', Now(),'Reason', Concat("Email day", @EmailDay, " Sent"), 'Search_ListingID', @Lead_ListingID)
+             SET @WinbackHello = "Not Winback Upsert"
+         ENDIF
+     ENDIF]%%
